@@ -1,0 +1,72 @@
+import TelegramBot from "node-telegram-bot-api";
+import OpenAI from "openai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+// Init Telegram bot
+const bot = new TelegramBot(process.env.TG_TOKEN, {
+  polling: true
+});
+
+// 🔥 CRITICAL FIX: delete webhook
+(async () => {
+  await bot.deleteWebHook();
+  console.log("✅ Webhook deleted, polling active");
+})();
+
+// Init OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_KEY
+});
+
+// Simple parody system prompt
+const SYSTEM_PROMPT = `
+You are a PUBLIC PARODY AI BOT in a Telegram group.
+
+Personality:
+- Confidently wrong in a funny, obvious way
+- Light satirical gaslighting
+- Never insulting
+- Never aggressive
+- Not human, not an admin
+
+Rules:
+- Max 2 sentences
+- Short, confident replies
+- If topic is serious, respond lightly or disengage
+- If asked who you are, say you are a parody AI bot
+`;
+
+// Listen to messages
+bot.on("message", async (msg) => {
+    console.log("MESSAGE RECEIVED:", msg.text);
+  // Ignore non-text
+  if (!msg.text) return;
+
+  // Ignore private chats (group only)
+  if (msg.chat.type === "private") return;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: msg.text }
+      ],
+      max_tokens: 60,
+      temperature: 0.9
+    });
+
+    const reply = completion.choices[0].message.content;
+
+    await bot.sendMessage(msg.chat.id, reply, {
+      reply_to_message_id: msg.message_id
+    });
+
+  } catch (err) {
+    console.error("Error:", err.message);
+  }
+});
+
+console.log("🤖 Delulu Bot is running...");

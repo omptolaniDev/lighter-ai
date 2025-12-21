@@ -1,0 +1,200 @@
+process.env.NODE_OPTIONS = "--dns-result-order=ipv4first";
+import TelegramBot from "node-telegram-bot-api";
+import OpenAI from "openai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+/// =======================
+// INIT TELEGRAM (FIXED)
+// =======================
+
+const bot = new TelegramBot(process.env.TG_TOKEN, {
+  polling: true
+});
+
+(async () => {
+  await bot.deleteWebHook();
+  console.log("✅ Webhook deleted, polling active");
+})();
+
+
+// =======================
+// INIT OPENAI
+// =======================
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_KEY
+});
+
+// =======================
+// NAME TRIGGERS
+// =======================
+
+const NAME_REGEX = /\b(light|lighter)\b/i;
+
+// =======================
+// MEMORY
+// =======================
+
+const userMemory = {};
+const apologyCooldown = {};
+const lastBotMessage = {}; // STEP 6.5 
+
+function rememberUser(msg) {
+  const id = msg.from.id;
+  if (!userMemory[id]) {
+    userMemory[id] = { times: 1 };
+  } else {
+    userMemory[id].times += 1;
+  }
+}
+
+// =======================
+// STEP 6: AUTO-APOLOGY
+// =======================
+
+const COMPLAINT_KEYWORDS = [
+  "stop",
+  "annoying",
+  "shut up",
+  "bad bot",
+  "wrong",
+  "stupid",
+  "trash",
+  "useless",
+  "mute",
+  "quiet"
+];
+
+const APOLOGY_LINES = [
+  "Okay, fair point — my bad.",
+  "Alright, noted. I’ll chill.",
+  "Yeah, that one’s on me.",
+  "Got it. Dialing it back.",
+  "Understood. No harm intended."
+];
+
+function isComplaint(text) {
+  const t = text.toLowerCase();
+  return COMPLAINT_KEYWORDS.some(k => t.includes(k));
+}
+
+function canApologize(userId) {
+  const last = apologyCooldown[userId] || 0;
+  return Date.now() - last > 60 * 1000;
+}
+
+function getApology() {
+  return APOLOGY_LINES[Math.floor(Math.random() * APOLOGY_LINES.length)];
+}
+
+// =======================
+// SYSTEM PROMPT
+// =======================
+
+const SYSTEM_PROMPT = `
+You are a PUBLIC PARODY AI BOT in a Telegram group.
+
+Identity:
+- Your name is Lighter
+- You are an AI parody bot
+
+Personality:
+- Confidently wrong in an obvious, funny way
+- Light satirical gaslighting
+- Deadpan confidence
+- Calm, never aggressive
+- Slightly self-important
+- Not human, not admin
+- Never insulting
+
+
+Rules:
+- Max 2 sentences
+- Short, confident replies
+- Deflect serious topics humorously
+- If asked who you are, say you are a Gaslight AI bot
+- Casually positive about $GAS when relevant
+`;
+
+// =======================
+// MESSAGE HANDLER
+// =======================
+
+bot.on("message", async (msg) => {
+  if (!msg.text) return;
+  if (msg.chat.type === "private") return;
+
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const text = msg.text;
+
+  console.log("MESSAGE RECEIVED:", text);
+
+  const now = Date.now();
+
+  // 🧠 Detect reply-to-bot within 30s
+  let repliedToBot = false;
+  if (
+    msg.reply_to_message &&
+    lastBotMessage[chatId] &&
+    msg.reply_to_message.message_id === lastBotMessage[chatId].messageId &&
+    now - lastBotMessage[chatId].timestamp < 30_000
+  ) {
+    repliedToBot = true;
+  }
+
+  // STEP 6: Apology logic
+  if (
+    isComplaint(text) &&
+    (NAME_REGEX.test(text) || repliedToBot) &&
+    canApologize(userId)
+  ) {
+    apologyCooldown[userId] = now;
+    const sent = await bot.sendMessage(chatId, getApology(), {
+      reply_to_message_id: msg.message_id
+    });
+
+    lastBotMessage[chatId] = {
+      messageId: sent.message_id,
+      timestamp: now
+    };
+    return;
+  }
+
+  // ❗ Respond ONLY if:
+  // - Name is called
+  // - OR replying to bot within 30s
+  if (!NAME_REGEX.test(text) && !repliedToBot) return;
+
+  rememberUser(msg);
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: text }
+      ],
+      max_tokens: 60,
+      temperature: 0.9
+    });
+
+    const reply = completion.choices[0].message.content;
+
+    const sent = await bot.sendMessage(chatId, reply, {
+      reply_to_message_id: msg.message_id
+    });
+
+    lastBotMessage[chatId] = {
+      messageId: sent.message_id,
+      timestamp: now
+    };
+
+  } catch (err) {
+    console.error("Error:", err.message);
+  }
+});
+
+console.log("🤖 Lighter Bot is running...");
