@@ -293,7 +293,7 @@ bot.on("message", async (msg) => {
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: text }
       ],
-      max_tokens: 12, // Short responses
+      max_tokens: 120, // Short responses
       temperature: 0.9
     });
 
