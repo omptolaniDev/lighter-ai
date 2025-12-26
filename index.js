@@ -5,9 +5,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-
+// =======================
 // INIT TELEGRAM
-
+// =======================
 
 const bot = new TelegramBot(process.env.TG_TOKEN, {
   polling: true
@@ -18,23 +18,36 @@ const bot = new TelegramBot(process.env.TG_TOKEN, {
   console.log("✅ Webhook deleted, polling active");
 })();
 
-
+// =======================
 // INIT OPENAI
-
+// =======================
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY
 });
 
-
+// =======================
 // NAME TRIGGERS
-
+// =======================
 
 const NAME_REGEX = /\b(light|lighter)\b/i;
 
+// Check if bot is mentioned/tagged
+function isBotMentioned(msg, bot) {
+  // Check for @username mention
+  if (msg.entities) {
+    for (const entity of msg.entities) {
+      if (entity.type === 'mention' || entity.type === 'text_mention') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
+// =======================
 // FUD DETECTION
-
+// =======================
 
 const FUD_KEYWORDS = [
   "down", "dump", "rug", "rekt", "scam", "sell", "selling", "crash",
@@ -83,7 +96,7 @@ const GASLIGHTING_RESPONSES = [
   "Those candles aren't red — they're passionately orange."
 ];
 
-// $GAS-specific responses (only ~20% of FUD responses mention $GAS)
+// $GAS-specific responses (only ~25% of FUD responses mention $GAS)
 const GAS_GASLIGHTING_RESPONSES = [
   "$GAS isn't dumping — reality is just coping.",
   "You're not rekt — you're early to the $GAS comeback arc.",
@@ -131,7 +144,9 @@ function rememberUser(msg) {
   }
 }
 
+// =======================
 // COMPLAINT HANDLING
+// =======================
 
 const COMPLAINT_KEYWORDS = [
   "stop", "annoying", "shut up", "bad bot", "wrong",
@@ -165,9 +180,9 @@ function getApology() {
   return APOLOGY_LINES[Math.floor(Math.random() * APOLOGY_LINES.length)];
 }
 
-
+// =======================
 // SYSTEM PROMPT
-
+// =======================
 
 const SYSTEM_PROMPT = `
 You are a PUBLIC PARODY AI BOT in a Telegram group.
@@ -194,23 +209,22 @@ $GAS Token Behavior (IMPORTANT):
 - Most responses should NOT mention $GAS at all
 
 Response Style:
-- Write 2-4 sentences (not just 1-2)
+- Write 1-2 sentences (keep it short)
 - Be conversational and engaging
-- Provide more context in your gaslighting
-- Make your responses feel complete, not rushed
+- Quick, punchy gaslighting
 - Show personality and wit
 
 Rules:
-- Max 4 sentences (aim for 2-3 usually)
+- Max 2 sentences
 - Confident, deadpan delivery
 - Deflect serious topics with humor
 - If asked who you are, say you're the Gaslight AI bot
 - Keep $GAS mentions rare and natural
 `;
 
-
+// =======================
 // MESSAGE HANDLER
-
+// =======================
 
 bot.on("message", async (msg) => {
   if (!msg.text) return;
@@ -224,20 +238,19 @@ bot.on("message", async (msg) => {
 
   const now = Date.now();
 
-  // Detect reply-to-bot within 30s
+  // Detect reply-to-bot within 40 seconds
   let repliedToBot = false;
   if (
     msg.reply_to_message &&
     lastBotMessage[chatId] &&
     msg.reply_to_message.message_id === lastBotMessage[chatId].messageId &&
-    now - lastBotMessage[chatId].timestamp < 30_000
+    now - lastBotMessage[chatId].timestamp < 40000
   ) {
     repliedToBot = true;
   }
 
-  // FUD RESPONSE (Priority)
-  if (detectFUD(text) && canRespondToFUD(chatId)) {
-    fudCooldown[chatId] = now;
+  // FUD RESPONSE (No cooldown - instant response)
+  if (detectFUD(text)) {
     const response = getGaslightResponse();
     
     const sent = await bot.sendMessage(chatId, response, {
@@ -251,13 +264,11 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // APOLOGY LOGIC
+  // APOLOGY LOGIC (No cooldown)
   if (
     isComplaint(text) &&
-    (NAME_REGEX.test(text) || repliedToBot) &&
-    canApologize(userId)
+    (NAME_REGEX.test(text) || repliedToBot)
   ) {
-    apologyCooldown[userId] = now;
     const sent = await bot.sendMessage(chatId, getApology(), {
       reply_to_message_id: msg.message_id
     });
@@ -269,8 +280,9 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // NORMAL RESPONSE (only if name called or replying to bot)
-  if (!NAME_REGEX.test(text) && !repliedToBot) return;
+  // NORMAL RESPONSE (only if name called, tagged, or replying to bot)
+  const isTagged = isBotMentioned(msg, bot);
+  if (!NAME_REGEX.test(text) && !repliedToBot && !isTagged) return;
 
   rememberUser(msg);
 
@@ -281,7 +293,7 @@ bot.on("message", async (msg) => {
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: text }
       ],
-      max_tokens: 120, // Increased from 60 for longer responses
+      max_tokens: 60, // Short responses
       temperature: 0.9
     });
 
